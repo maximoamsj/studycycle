@@ -156,6 +156,7 @@ input[type=number] { -moz-appearance:textfield; }
       <div class="nav-item" onclick="nav('sessao')"><span class="nav-icon">◷</span> Registrar Sessão</div>
       <div class="nav-item" onclick="nav('questoes')"><span class="nav-icon">◎</span> Registrar Questões</div>
       <div class="nav-item" onclick="nav('desempenho')"><span class="nav-icon">◈</span> Desempenho</div>
+      <div class="nav-item" onclick="nav('topicos')"><span class="nav-icon">⊟</span> Tópicos</div>
       <div class="nav-item" onclick="nav('disciplinas')"><span class="nav-icon">◧</span> Disciplinas</div>
     </div>
     <div class="sidebar-footer">
@@ -248,21 +249,42 @@ input[type=number] { -moz-appearance:textfield; }
       </div>
       <div class="g2">
         <div class="card">
+          <div class="card-title" id="q-form-title">Novo Registro</div>
           <div class="fg"><label class="fl">Disciplina</label><select id="q-disc" class="fc" onchange="loadTopicHints()"><option value="">Selecione...</option></select></div>
-          <div class="fg"><label class="fl">Tópico</label><input type="text" id="q-topic" class="fc" placeholder="Ex: Atos Administrativos — Elementos" list="topic-hints"><datalist id="topic-hints"></datalist></div>
+          <div class="fg"><label class="fl">Tópico</label><input type="text" id="q-topic" class="fc" placeholder="Ex: Atos Administrativos — Elementos" list="topic-hints" autocomplete="off"><datalist id="topic-hints"></datalist></div>
           <div class="g2">
             <div class="fg"><label class="fl">✓ Acertos</label><input type="number" id="q-c" class="fc" placeholder="0" min="0"></div>
             <div class="fg"><label class="fl">✗ Erros</label><input type="number" id="q-w" class="fc" placeholder="0" min="0"></div>
           </div>
           <div class="fg"><label class="fl">Data</label><input type="date" id="q-date" class="fc"></div>
-          <button class="btn btn-p" onclick="saveQ()">Salvar Registro</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-p" id="q-save-btn" onclick="saveQ()">Salvar Registro</button>
+            <button class="btn btn-s" id="q-cancel-btn" onclick="cancelEditQ()" style="display:none">Cancelar</button>
+          </div>
         </div>
         <div class="card">
-          <div class="card-title">Últimos Registros</div>
+          <div class="card-title">Registros</div>
           <table class="tbl">
-            <thead><tr><th>Disciplina</th><th>Tópico</th><th>✓</th><th>✗</th><th>%</th></tr></thead>
+            <thead><tr><th>Data</th><th>Disciplina</th><th>Tópico</th><th>✓</th><th>✗</th><th>%</th><th></th></tr></thead>
             <tbody id="q-recent"></tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TÓPICOS -->
+    <div id="view-topicos" class="view">
+      <div class="page-header">
+        <h2>Tópicos</h2>
+        <p>Funda variações do mesmo assunto para limpar a análise de desempenho</p>
+      </div>
+      <div class="card">
+        <div class="fb mb16">
+          <span class="card-title" style="margin-bottom:0">Consolidar Tópicos</span>
+          <select id="topic-filt-disc" class="fc" style="width:220px" onchange="renderTopicMerge()"><option value="">Selecione a disciplina...</option></select>
+        </div>
+        <div id="topic-merge-area">
+          <p style="font-size:12px;color:var(--text-muted)">Selecione uma disciplina para ver seus tópicos.</p>
         </div>
       </div>
     </div>
@@ -519,6 +541,7 @@ function nav(v) {
   if (v==='sessao') initSessao();
   if (v==='questoes') initQ();
   if (v==='desempenho') renderPerf();
+  if (v==='topicos') initTopicos();
   if (v==='disciplinas') renderDiscs();
 }
 
@@ -806,46 +829,179 @@ function initQ() {
   const sel = document.getElementById('q-disc');
   sel.innerHTML = '<option value="">Selecione...</option>' +
     notPending().map(d => `<option value="${d.id}">${d.name}</option>`).join('');
-  document.getElementById('q-date').value = today();
+  if (!editQId) document.getElementById('q-date').value = today();
+  loadTopicHints();
   renderRecentQ();
 }
 
-function loadTopicHints() {
-  const id = document.getElementById('q-disc').value;
-  const topics = [...new Set(D.questions.filter(q=>q.discId===id).map(q=>q.topic))];
-  document.getElementById('topic-hints').innerHTML = topics.map(t=>`<option value="${t}">`).join('');
+function allKnownTopics() {
+  // pulls topics from BOTH questions and sessions, across ALL disciplines
+  const fromQ = D.questions.map(q => q.topic);
+  const fromS = D.sessions.filter(s => s.topic).map(s => s.topic);
+  return [...new Set([...fromQ, ...fromS])].filter(Boolean).sort((a,b)=>a.localeCompare(b));
 }
+function loadTopicHints() {
+  // suggest this discipline's topics first, then all others
+  const id = document.getElementById('q-disc').value;
+  const own = [...new Set(D.questions.filter(q=>q.discId===id).map(q=>q.topic).concat(
+              D.sessions.filter(s=>s.discId===id && s.topic).map(s=>s.topic)))].filter(Boolean);
+  const rest = allKnownTopics().filter(t => !own.includes(t));
+  const ordered = [...own.sort((a,b)=>a.localeCompare(b)), ...rest];
+  document.getElementById('topic-hints').innerHTML = ordered.map(t=>`<option value="${t}">`).join('');
+}
+
+let editQId = null;
 
 function saveQ() {
   const discId = document.getElementById('q-disc').value;
   const topic = document.getElementById('q-topic').value.trim();
-  const c = parseInt(document.getElementById('q-c').value) || 0;
-  const w = parseInt(document.getElementById('q-w').value) || 0;
+  const cc = parseInt(document.getElementById('q-c').value) || 0;
+  const ww = parseInt(document.getElementById('q-w').value) || 0;
   const date = document.getElementById('q-date').value;
-  if (!discId || !topic || (c+w===0)) { toast('Preencha disciplina, tópico e questões', true); return; }
-  D.questions.push({ id: Date.now()+'', discId, topic, c, w, date });
+  if (!discId || !topic || (cc+ww===0)) { toast('Preencha disciplina, tópico e questões', true); return; }
+
+  if (editQId) {
+    const idx = D.questions.findIndex(q => q.id === editQId);
+    if (idx > -1) D.questions[idx] = { ...D.questions[idx], discId, topic, c:cc, w:ww, date };
+    cancelEditQ();
+    toast('Registro atualizado ✓');
+  } else {
+    D.questions.push({ id: Date.now()+'', discId, topic, c:cc, w:ww, date });
+    document.getElementById('q-topic').value = '';
+    document.getElementById('q-c').value = '';
+    document.getElementById('q-w').value = '';
+    toast('Questões registradas ✓');
+  }
   save();
+  renderRecentQ();
+}
+
+function editQ(id) {
+  const q = D.questions.find(x => x.id === id);
+  if (!q) return;
+  editQId = id;
+  loadTopicHints();
+  document.getElementById('q-disc').value = q.discId;
+  loadTopicHints();
+  document.getElementById('q-topic').value = q.topic;
+  document.getElementById('q-c').value = q.c;
+  document.getElementById('q-w').value = q.w;
+  document.getElementById('q-date').value = q.date;
+  document.getElementById('q-form-title').textContent = 'Editar Registro';
+  document.getElementById('q-save-btn').textContent = 'Salvar Alterações';
+  document.getElementById('q-cancel-btn').style.display = '';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function cancelEditQ() {
+  editQId = null;
+  document.getElementById('q-disc').value = '';
   document.getElementById('q-topic').value = '';
   document.getElementById('q-c').value = '';
   document.getElementById('q-w').value = '';
+  document.getElementById('q-date').value = today();
+  document.getElementById('q-form-title').textContent = 'Novo Registro';
+  document.getElementById('q-save-btn').textContent = 'Salvar Registro';
+  document.getElementById('q-cancel-btn').style.display = 'none';
+}
+
+function deleteQ(id) {
+  if (!confirm('Excluir este registro de questões?')) return;
+  D.questions = D.questions.filter(q => q.id !== id);
+  save();
   renderRecentQ();
-  toast('Questões registradas ✓');
+  toast('Registro excluído');
 }
 
 function renderRecentQ() {
-  const rec = [...D.questions].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,8);
+  const rec = [...D.questions].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
   document.getElementById('q-recent').innerHTML = rec.map(q => {
     const d = disc(q.discId);
     const t = q.c + q.w;
     const p = t ? Math.round(q.c/t*100) : 0;
-    return `<tr>
+    const isEditing = q.id === editQId;
+    return `<tr style="${isEditing?'background:var(--accent-dim)':''}">
+      <td style="font-size:11px">${fmt(q.date)}</td>
       <td style="font-size:11px">${d?d.name.split(' ').slice(0,2).join(' '):'?'}</td>
       <td style="font-size:11px">${q.topic}</td>
       <td style="color:var(--accent)">${q.c}</td>
       <td style="color:var(--red)">${q.w}</td>
       <td style="color:${pctCol(t?p:null)};font-weight:600">${t?p+'%':'—'}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-s btn-sm" onclick="editQ('${q.id}')" title="Editar">✎</button>
+        <button class="btn btn-r btn-sm" style="margin-left:4px" onclick="deleteQ('${q.id}')" title="Excluir">✕</button>
+      </td>
     </tr>`;
-  }).join('') || '<tr><td colspan="5" style="color:var(--text-muted)">Sem registros.</td></tr>';
+  }).join('') || '<tr><td colspan="7" style="color:var(--text-muted)">Sem registros.</td></tr>';
+}
+
+// ============ TÓPICOS (consolidação) ============
+function initTopicos() {
+  const sel = document.getElementById('topic-filt-disc');
+  sel.innerHTML = '<option value="">Selecione a disciplina...</option>' +
+    notPending().map(d=>`<option value="${d.id}">${d.name}</option>`).join('');
+  document.getElementById('topic-merge-area').innerHTML =
+    '<p style="font-size:12px;color:var(--text-muted)">Selecione uma disciplina para ver seus tópicos.</p>';
+}
+
+function topicsForDisc(discId) {
+  // gather distinct topics from questions + sessions for this discipline, with counts
+  const map = {};
+  D.questions.filter(q => q.discId===discId).forEach(q => {
+    if (!map[q.topic]) map[q.topic] = { topic:q.topic, qCount:0, sCount:0, c:0, w:0 };
+    map[q.topic].qCount++; map[q.topic].c += q.c; map[q.topic].w += q.w;
+  });
+  D.sessions.filter(s => s.discId===discId && s.topic).forEach(s => {
+    if (!map[s.topic]) map[s.topic] = { topic:s.topic, qCount:0, sCount:0, c:0, w:0 };
+    map[s.topic].sCount++;
+  });
+  return Object.values(map).sort((a,b)=>a.topic.localeCompare(b.topic));
+}
+
+function renderTopicMerge() {
+  const discId = document.getElementById('topic-filt-disc').value;
+  const area = document.getElementById('topic-merge-area');
+  if (!discId) { area.innerHTML = '<p style="font-size:12px;color:var(--text-muted)">Selecione uma disciplina.</p>'; return; }
+  const topics = topicsForDisc(discId);
+  if (!topics.length) { area.innerHTML = '<p style="font-size:12px;color:var(--text-muted)">Nenhum tópico registrado nesta disciplina ainda.</p>'; return; }
+
+  let html = `<p style="font-size:11px;color:var(--text-muted);margin-bottom:14px;line-height:1.6">
+    Marque dois ou mais tópicos que são a mesma coisa, escolha (ou digite) o nome final e clique em Fundir.
+    Os registros de questões e sessões serão reescritos.
+  </p>`;
+  html += `<div style="max-height:340px;overflow-y:auto;margin-bottom:16px">`;
+  topics.forEach((t, i) => {
+    const total = t.c + t.w;
+    const pct = total ? Math.round(t.c/total*100) : null;
+    html += `<label class="dr" style="cursor:pointer;display:flex;align-items:center;gap:10px">
+      <input type="checkbox" class="tmerge-cb" value="${encodeURIComponent(t.topic)}" style="width:15px;height:15px;accent-color:var(--accent);cursor:pointer">
+      <div style="flex:1">
+        <div class="dr-name">${t.topic}</div>
+        <div class="dr-sub">${t.qCount} registro(s) de questões${t.sCount?` · ${t.sCount} sessão(ões)`:''}${total?` · ${pct}% (${total}q)`:''}</div>
+      </div>
+    </label>`;
+  });
+  html += `</div>`;
+  html += `<div class="fg"><label class="fl">Nome final do tópico (após fundir)</label>
+    <input type="text" id="merge-target" class="fc" placeholder="Ex: Atos Administrativos" list="merge-target-hints">
+    <datalist id="merge-target-hints">${topics.map(t=>`<option value="${t.topic}">`).join('')}</datalist></div>`;
+  html += `<button class="btn btn-a" onclick="mergeTopics('${discId}')">Fundir Selecionados</button>`;
+  area.innerHTML = html;
+}
+
+function mergeTopics(discId) {
+  const checked = [...document.querySelectorAll('.tmerge-cb:checked')].map(cb => decodeURIComponent(cb.value));
+  const target = document.getElementById('merge-target').value.trim();
+  if (checked.length < 1) { toast('Selecione ao menos um tópico', true); return; }
+  if (!target) { toast('Informe o nome final do tópico', true); return; }
+  if (checked.length === 1 && checked[0] === target) { toast('Nada para fundir — nome igual', true); return; }
+
+  let count = 0;
+  D.questions.forEach(q => { if (q.discId===discId && checked.includes(q.topic)) { q.topic = target; count++; } });
+  D.sessions.forEach(s => { if (s.discId===discId && s.topic && checked.includes(s.topic)) { s.topic = target; count++; } });
+  save();
+  renderTopicMerge();
+  toast(`${count} registro(s) atualizados → "${target}" ✓`);
 }
 
 // ============ DESEMPENHO ============
