@@ -232,7 +232,10 @@ input[type=number] { -moz-appearance:textfield; }
           </div>
         </div>
         <div class="card">
-          <div class="card-title">Sessões Registradas</div>
+          <div class="fb mb16">
+            <span class="card-title" style="margin-bottom:0">Sessões Registradas</span>
+            <select id="sess-filt-disc" class="fc" style="width:200px" onchange="renderRecentSess()"><option value="">Todas as disciplinas</option></select>
+          </div>
           <table class="tbl">
             <thead><tr><th>Data</th><th>Disciplina</th><th>Tópico</th><th>Horas</th><th>Notas</th><th></th></tr></thead>
             <tbody id="sess-recent-body"></tbody>
@@ -737,6 +740,14 @@ function initSessaoDropdown() {
 
 function initSessao() {
   initSessaoDropdown();
+  // popula filtro com todas as disciplinas que têm sessões
+  const filtSel = document.getElementById('sess-filt-disc');
+  const prev = filtSel.value;
+  const usedIds = [...new Set(D.sessions.map(s => s.discId))];
+  const used = D.disciplines.filter(d => usedIds.includes(d.id));
+  filtSel.innerHTML = '<option value="">Todas as disciplinas</option>' +
+    used.map(d=>`<option value="${d.id}">${d.name}</option>`).join('');
+  filtSel.value = prev;
   document.getElementById('s-date').value = today();
   renderRecentSess();
 }
@@ -806,7 +817,14 @@ function deleteSession(id) {
 }
 
 function renderRecentSess() {
-  const rec = [...D.sessions].sort((a,b)=>b.date?.localeCompare(a.date));
+  const filt = document.getElementById('sess-filt-disc')?.value || '';
+  const rec = [...D.sessions]
+    .filter(s => !filt || s.discId === filt)
+    .sort((a,b) => {
+      const dc = (b.date||'').localeCompare(a.date||'');
+      if (dc !== 0) return dc;
+      return (b.id||'').localeCompare(a.id||''); // mesmo dia → mais recente primeiro
+    });
   document.getElementById('sess-recent-body').innerHTML = rec.map(s => {
     const d = disc(s.discId);
     const isEditing = s.id === editSessionId;
@@ -821,7 +839,7 @@ function renderRecentSess() {
         <button class="btn btn-r btn-sm" style="margin-left:4px" onclick="deleteSession('${s.id}')" title="Excluir">✕</button>
       </td>
     </tr>`;
-  }).join('') || '<tr><td colspan="5" style="color:var(--text-muted)">Sem sessões.</td></tr>';
+  }).join('') || '<tr><td colspan="6" style="color:var(--text-muted)">Sem sessões.</td></tr>';
 }
 
 // ============ QUESTÕES ============
