@@ -223,7 +223,7 @@ input[type=number] { -moz-appearance:textfield; }
           <div class="fg"><label class="fl">Tópico (opcional)</label><input type="text" id="s-topic" class="fc" placeholder="Ex: Atos Administrativos — Elementos" list="sess-topic-hints"><datalist id="sess-topic-hints"></datalist></div>
           <div class="g2">
             <div class="fg"><label class="fl">Data</label><input type="date" id="s-date" class="fc"></div>
-            <div class="fg"><label class="fl">Duração (horas)</label><input type="number" id="s-hrs" class="fc" placeholder="2.0" step="0.5" min="0.5" max="12"></div>
+            <div class="fg"><label class="fl">Duração</label><input type="text" id="s-hrs" class="fc" placeholder="1:30 ou 90 (min)"><div style="font-size:10px;color:var(--text-muted);margin-top:4px">Formatos: <strong>1:30</strong> · <strong>90</strong> (minutos) · <strong>1.5</strong> (horas)</div></div>
           </div>
           <div class="fg"><label class="fl">Notas (opcional)</label><input type="text" id="s-notes" class="fc" placeholder="Ex: Conclui poderes da Adm., iniciando atos..."></div>
           <div style="display:flex;gap:8px">
@@ -372,6 +372,19 @@ input[type=number] { -moz-appearance:textfield; }
         A frequência aumenta automaticamente conforme você marca revisões concluídas, chegando até 8 ciclos.
       </p>
     </div>
+    <div class="fg" id="goal-field">
+      <label class="fl">Meta de horas no ciclo</label>
+      <select id="modal-goal" class="fc">
+        <option value="1">1h</option>
+        <option value="1.25">1h15</option>
+        <option value="1.5">1h30</option>
+        <option value="1.75">1h45</option>
+        <option value="2">2h</option>
+        <option value="2.5">2h30</option>
+        <option value="3">3h</option>
+        <option value="4">4h</option>
+      </select>
+    </div>
     <div style="display:flex;gap:8px;margin-top:20px">
       <button class="btn btn-p" onclick="applyStatus()">Confirmar</button>
       <button class="btn btn-s" onclick="closeModal()">Cancelar</button>
@@ -399,6 +412,19 @@ input[type=number] { -moz-appearance:textfield; }
         <option value="inativa">Inativa</option>
       </select>
     </div>
+    <div class="fg">
+      <label class="fl">Meta de horas no ciclo</label>
+      <select id="nd-goal" class="fc">
+        <option value="1">1h</option>
+        <option value="1.25">1h15</option>
+        <option value="1.5">1h30</option>
+        <option value="1.75">1h45</option>
+        <option value="2" selected>2h</option>
+        <option value="2.5">2h30</option>
+        <option value="3">3h</option>
+        <option value="4">4h</option>
+      </select>
+    </div>
     <div style="display:flex;gap:8px;margin-top:20px">
       <button class="btn btn-p" onclick="saveNewDisc()">Criar Disciplina</button>
       <button class="btn btn-s" onclick="closeNewDiscModal()">Cancelar</button>
@@ -421,23 +447,23 @@ input[type=number] { -moz-appearance:textfield; }
 <script>
 // ============ DATA ============
 const DISCIPLINES = [
-  { id:'ctrl-ext',  name:'Controle Externo',                   area:'Geral',       status:'revisao',  reviewEvery:2, lastReviewedCycle:0 },
-  { id:'dir-adm',   name:'Direito Administrativo',              area:'Geral',       status:'ativa',    reviewEvery:2, lastReviewedCycle:0 },
-  { id:'dir-con',   name:'Direito Constitucional',              area:'Geral',       status:'ativa',    reviewEvery:2, lastReviewedCycle:0 },
-  { id:'afo',       name:'Adm. Financeira e Orçamentária',      area:'Específico',  status:'ativa',    reviewEvery:2, lastReviewedCycle:0 },
-  { id:'contab',    name:'Contabilidade Pública',               area:'Específico',  status:'ativa',    reviewEvery:2, lastReviewedCycle:0 },
-  { id:'port',      name:'Língua Portuguesa',                   area:'Geral',       status:'pendente', reviewEvery:2, lastReviewedCycle:0 },
-  { id:'ing',       name:'Língua Inglesa',                      area:'Geral',       status:'pendente', reviewEvery:2, lastReviewedCycle:0 },
-  { id:'mat-fin',   name:'Matemática Financeira',               area:'Geral',       status:'pendente', reviewEvery:2, lastReviewedCycle:0 },
-  { id:'adm-pub',   name:'Administração Pública',               area:'Geral',       status:'pendente', reviewEvery:2, lastReviewedCycle:0 },
-  { id:'dir-civ',   name:'Direito Civil',                       area:'Geral',       status:'pendente', reviewEvery:2, lastReviewedCycle:0 },
-  { id:'dir-proc',  name:'Direito Processual Civil',            area:'Geral',       status:'pendente', reviewEvery:2, lastReviewedCycle:0 },
-  { id:'anticorr',  name:'Sistema Normativo Anticorrupção',     area:'Geral',       status:'pendente', reviewEvery:2, lastReviewedCycle:0 },
-  { id:'estat',     name:'Estatística',                         area:'Específico',  status:'pendente', reviewEvery:2, lastReviewedCycle:0 },
-  { id:'analise',   name:'Análise de Dados',                    area:'Específico',  status:'pendente', reviewEvery:2, lastReviewedCycle:0 },
-  { id:'audit',     name:'Auditoria Governamental',             area:'Específico',  status:'pendente', reviewEvery:2, lastReviewedCycle:0 },
-  { id:'anal-dc',   name:'Análise das Demonstrações Contábeis', area:'Específico',  status:'pendente', reviewEvery:2, lastReviewedCycle:0 },
-  { id:'econ',      name:'Economia do Setor Público',           area:'Específico',  status:'pendente', reviewEvery:2, lastReviewedCycle:0 },
+  { id:'ctrl-ext',  name:'Controle Externo',                   area:'Geral',       status:'revisao',  cycleHours:2, reviewEvery:2, lastReviewedCycle:0 },
+  { id:'dir-adm',   name:'Direito Administrativo',              area:'Geral',       status:'ativa',    cycleHours:2, reviewEvery:2, lastReviewedCycle:0 },
+  { id:'dir-con',   name:'Direito Constitucional',              area:'Geral',       status:'ativa',    cycleHours:2, reviewEvery:2, lastReviewedCycle:0 },
+  { id:'afo',       name:'Adm. Financeira e Orçamentária',      area:'Específico',  status:'ativa',    cycleHours:2, reviewEvery:2, lastReviewedCycle:0 },
+  { id:'contab',    name:'Contabilidade Pública',               area:'Específico',  status:'ativa',    cycleHours:2, reviewEvery:2, lastReviewedCycle:0 },
+  { id:'port',      name:'Língua Portuguesa',                   area:'Geral',       status:'pendente', cycleHours:2, reviewEvery:2, lastReviewedCycle:0 },
+  { id:'ing',       name:'Língua Inglesa',                      area:'Geral',       status:'pendente', cycleHours:2, reviewEvery:2, lastReviewedCycle:0 },
+  { id:'mat-fin',   name:'Matemática Financeira',               area:'Geral',       status:'pendente', cycleHours:2, reviewEvery:2, lastReviewedCycle:0 },
+  { id:'adm-pub',   name:'Administração Pública',               area:'Geral',       status:'pendente', cycleHours:2, reviewEvery:2, lastReviewedCycle:0 },
+  { id:'dir-civ',   name:'Direito Civil',                       area:'Geral',       status:'pendente', cycleHours:2, reviewEvery:2, lastReviewedCycle:0 },
+  { id:'dir-proc',  name:'Direito Processual Civil',            area:'Geral',       status:'pendente', cycleHours:2, reviewEvery:2, lastReviewedCycle:0 },
+  { id:'anticorr',  name:'Sistema Normativo Anticorrupção',     area:'Geral',       status:'pendente', cycleHours:2, reviewEvery:2, lastReviewedCycle:0 },
+  { id:'estat',     name:'Estatística',                         area:'Específico',  status:'pendente', cycleHours:2, reviewEvery:2, lastReviewedCycle:0 },
+  { id:'analise',   name:'Análise de Dados',                    area:'Específico',  status:'pendente', cycleHours:2, reviewEvery:2, lastReviewedCycle:0 },
+  { id:'audit',     name:'Auditoria Governamental',             area:'Específico',  status:'pendente', cycleHours:2, reviewEvery:2, lastReviewedCycle:0 },
+  { id:'anal-dc',   name:'Análise das Demonstrações Contábeis', area:'Específico',  status:'pendente', cycleHours:2, reviewEvery:2, lastReviewedCycle:0 },
+  { id:'econ',      name:'Economia do Setor Público',           area:'Específico',  status:'pendente', cycleHours:2, reviewEvery:2, lastReviewedCycle:0 },
 ];
 
 const DEFAULT = {
@@ -521,6 +547,44 @@ function qStats(id) {
 function today() { return new Date().toISOString().split('T')[0]; }
 function fmt(d) { if(!d) return '—'; const [y,m,dd]=d.split('-'); return `${dd}/${m}/${y}`; }
 
+// ============ TIME HELPERS ============
+// Aceita "1:30" (h:mm), "90" (minutos puros), "1.5" (decimal/legado) → retorna horas decimais
+function parseTime(raw) {
+  if (raw === null || raw === undefined) return NaN;
+  const s = String(raw).trim().replace(',', '.');
+  if (!s) return NaN;
+  if (s.includes(':')) {
+    const [h, m] = s.split(':');
+    const hh = parseInt(h) || 0;
+    const mm = parseInt(m) || 0;
+    return hh + mm/60;
+  }
+  if (s.includes('.')) {
+    return parseFloat(s); // decimal de horas (legado)
+  }
+  // inteiro puro = minutos
+  const min = parseInt(s);
+  return isNaN(min) ? NaN : min/60;
+}
+// horas decimais → "1h30", "1h45", "2h", "45min"
+function fmtH(hours) {
+  if (hours === null || hours === undefined || isNaN(hours)) return '0h';
+  const totalMin = Math.round(hours * 60);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h === 0) return m + 'min';
+  if (m === 0) return h + 'h';
+  return h + 'h' + String(m).padStart(2,'0');
+}
+function discGoal(d) { return (d && d.cycleHours) ? d.cycleHours : 2; }
+// horas decimais → "1:30" para preencher campo editável
+function fmtHInput(hours) {
+  if (!hours || isNaN(hours)) return '';
+  const totalMin = Math.round(hours * 60);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return h + ':' + String(m).padStart(2,'0');
+}
 function pctCol(p) {
   if (p===null) return 'var(--text-muted)';
   if (p>=75) return 'var(--accent)';
@@ -553,14 +617,14 @@ let chMonthly = null;
 
 // Returns active disciplines not yet done in current cycle (queue order)
 function getQueue() {
-  return actives().filter(d => hoursFor(d.id, D.meta.cycle) < 2);
+  return actives().filter(d => hoursFor(d.id, D.meta.cycle) < discGoal(d));
 }
 
 // Check if all actives completed 2h → auto-advance cycle
 function checkCycleComplete() {
   const acts = actives();
   if (!acts.length) return;
-  const allDone = acts.every(d => hoursFor(d.id, D.meta.cycle) >= 2);
+  const allDone = acts.every(d => hoursFor(d.id, D.meta.cycle) >= discGoal(d));
   if (allDone) {
     D.meta.cycle++;
     save();
@@ -606,9 +670,10 @@ function renderDash() {
   }
 
   nextTwo.forEach((d, idx) => {
+    const goal = discGoal(d);
     const h = hoursFor(d.id, D.meta.cycle);
-    const rem = Math.max(0, 2 - h);
-    const pctFill = Math.min(100, h/2*100);
+    const rem = Math.max(0, goal - h);
+    const pctFill = Math.min(100, h/goal*100);
     const isNext = idx === 0;
     html += `<div class="plan-item act" style="${isNext?'border-left-color:var(--accent)':'border-left-color:rgba(0,212,170,0.3)'}">
       <div style="flex:1">
@@ -618,10 +683,10 @@ function renderDash() {
         <div style="font-size:13px;font-weight:500">${d.name}</div>
         <div style="margin-top:8px">
           <div class="fb" style="font-size:11px;margin-bottom:4px">
-            <span style="color:var(--text-muted)">${h.toFixed(1)}h feitas</span>
-            <span style="color:${rem>0?'var(--amber)':'var(--accent)'};font-weight:600">${rem>0?rem.toFixed(1)+'h restantes':'✓ Meta atingida'}</span>
+            <span style="color:var(--text-muted)">${fmtH(h)} de ${fmtH(goal)}</span>
+            <span style="color:${rem>0?'var(--amber)':'var(--accent)'};font-weight:600">${rem>0?fmtH(rem)+' restantes':'✓ Meta atingida'}</span>
           </div>
-          <div class="prog"><div class="prog-f ${h<1?'rd':h<2?'am':''}" style="width:${pctFill}%"></div></div>
+          <div class="prog"><div class="prog-f ${h<goal*0.5?'rd':h<goal?'am':''}" style="width:${pctFill}%"></div></div>
         </div>
       </div>
     </div>`;
@@ -650,15 +715,16 @@ function renderDash() {
   // Cycle progress — all actives
   let prog = '';
   acts.forEach(d => {
+    const goal = discGoal(d);
     const h = hoursFor(d.id, D.meta.cycle);
-    const p = Math.min(100, h/2*100);
-    const isDone = h >= 2;
+    const p = Math.min(100, h/goal*100);
+    const isDone = h >= goal;
     prog += `<div style="margin-bottom:13px">
       <div class="fb" style="font-size:12px">
         <span style="color:${isDone?'var(--text-muted)':''}">${isDone?'✓ ':''}<span style="text-decoration:${isDone?'line-through':''};opacity:${isDone?'0.5':'1'}">${d.name}</span></span>
-        <span style="color:${isDone?'var(--accent)':'var(--amber)'};font-weight:500">${h.toFixed(1)}/2h</span>
+        <span style="color:${isDone?'var(--accent)':'var(--amber)'};font-weight:500">${fmtH(h)} / ${fmtH(goal)}</span>
       </div>
-      <div class="prog"><div class="prog-f ${isDone?'':h<1?'rd':'am'}" style="width:${p}%"></div></div>
+      <div class="prog"><div class="prog-f ${isDone?'':h<goal*0.5?'rd':'am'}" style="width:${p}%"></div></div>
     </div>`;
   });
   document.getElementById('cycle-progress').innerHTML = prog || '<p style="font-size:12px;color:var(--text-muted)">Sem disciplinas ativas.</p>';
@@ -667,7 +733,7 @@ function renderDash() {
   const rec = [...D.sessions].sort((a,b)=>b.date?.localeCompare(a.date)).slice(0,8);
   document.getElementById('recent-sess').innerHTML = rec.map(s => {
     const d = disc(s.discId);
-    return `<tr><td>${fmt(s.date)}</td><td>${d?d.name:'?'}</td><td style="color:var(--accent);font-weight:500">${s.hrs}h</td><td style="color:var(--text-muted)">${s.notes||'—'}</td></tr>`;
+    return `<tr><td>${fmt(s.date)}</td><td>${d?d.name:'?'}</td><td style="color:var(--accent);font-weight:500">${fmtH(s.hrs)}</td><td style="color:var(--text-muted)">${s.notes||'—'}</td></tr>`;
   }).join('') || `<tr><td colspan="4" style="color:var(--text-muted)">Nenhuma sessão registrada ainda.</td></tr>`;
 
   // Monthly chart
@@ -757,10 +823,10 @@ let editSessionId = null;
 function saveSession() {
   const discId = document.getElementById('s-disc').value;
   const date = document.getElementById('s-date').value;
-  const hrs = parseFloat(document.getElementById('s-hrs').value);
+  const hrs = parseTime(document.getElementById('s-hrs').value);
   const topic = document.getElementById('s-topic').value.trim();
   const notes = document.getElementById('s-notes').value.trim();
-  if (!discId || !date || isNaN(hrs) || hrs <= 0) { toast('Preencha os campos obrigatórios', true); return; }
+  if (!discId || !date || isNaN(hrs) || hrs <= 0) { toast('Preencha os campos obrigatórios (duração ex: 1:30 ou 90)', true); return; }
 
   if (editSessionId) {
     const idx = D.sessions.findIndex(s => s.id === editSessionId);
@@ -787,7 +853,7 @@ function editSession(id) {
   document.getElementById('s-disc').value = s.discId;
   loadSessTopicHints();
   document.getElementById('s-date').value = s.date;
-  document.getElementById('s-hrs').value = s.hrs;
+  document.getElementById('s-hrs').value = fmtHInput(s.hrs);
   document.getElementById('s-topic').value = s.topic || '';
   document.getElementById('s-notes').value = s.notes || '';
   document.getElementById('s-form-title').textContent = 'Editar Sessão';
@@ -832,7 +898,7 @@ function renderRecentSess() {
       <td>${fmt(s.date)}</td>
       <td style="font-size:11px">${d?d.name:'?'}</td>
       <td style="font-size:11px;color:var(--text-muted)">${s.topic||'—'}</td>
-      <td style="color:var(--accent)">${s.hrs}h</td>
+      <td style="color:var(--accent)">${fmtH(s.hrs)}</td>
       <td style="color:var(--text-muted);font-size:11px">${s.notes||'—'}</td>
       <td style="white-space:nowrap">
         <button class="btn btn-s btn-sm" onclick="editSession('${s.id}')" title="Editar">✎</button>
@@ -1110,8 +1176,8 @@ function renderDiscs() {
       }
       return `<div class="dr" style="${st==='inativa'?'opacity:0.5':''}">
         <div>
-          <div class="dr-name">${d.name}</div>
-          <div class="dr-sub">${d.area} · ${h.toFixed(1)}h estudadas · ${s.t?s.pct+'% ('+s.t+' questões)':'sem questões'}</div>
+          <div class="dr-name">${d.name}${st==='ativa'?` <span style="font-size:10px;color:var(--accent)">· meta ${fmtH(discGoal(d))}/ciclo</span>`:''}</div>
+          <div class="dr-sub">${d.area} · ${fmtH(h)} estudadas · ${s.t?s.pct+'% ('+s.t+' questões)':'sem questões'}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           ${extra}
@@ -1130,19 +1196,24 @@ function openModal(id) {
   document.getElementById('modal-title').textContent = d.name;
   document.getElementById('modal-status').value = d.status;
   document.getElementById('modal-rev-every').value = d.reviewEvery || 2;
+  document.getElementById('modal-goal').value = discGoal(d);
   toggleRevFields();
   document.getElementById('modal-overlay').classList.add('show');
 }
 function toggleRevFields() {
-  document.getElementById('rev-fields').style.display =
-    document.getElementById('modal-status').value === 'revisao' ? 'block' : 'none';
+  const st = document.getElementById('modal-status').value;
+  document.getElementById('rev-fields').style.display = st === 'revisao' ? 'block' : 'none';
+  // meta de horas só faz sentido para disciplina ativa
+  document.getElementById('goal-field').style.display = st === 'ativa' ? 'block' : 'none';
 }
 function applyStatus() {
   const d = disc(editId);
   const ns = document.getElementById('modal-status').value;
   const re = parseInt(document.getElementById('modal-rev-every').value);
+  const goal = parseFloat(document.getElementById('modal-goal').value);
   d.status = ns;
   if (ns === 'revisao') { d.reviewEvery = re; d.lastReviewedCycle = D.meta.cycle; }
+  if (ns === 'ativa') { d.cycleHours = goal; }
   save();
   closeModal();
   renderDiscs();
@@ -1165,6 +1236,7 @@ function openNewDiscModal() {
   document.getElementById('nd-name').value = '';
   document.getElementById('nd-area').value = 'Geral';
   document.getElementById('nd-status').value = 'pendente';
+  document.getElementById('nd-goal').value = '2';
   document.getElementById('modal-newdisc').classList.add('show');
   setTimeout(() => document.getElementById('nd-name').focus(), 100);
 }
@@ -1176,8 +1248,9 @@ function saveNewDisc() {
   if (!name) { toast('Informe o nome da disciplina', true); return; }
   const area = document.getElementById('nd-area').value;
   const status = document.getElementById('nd-status').value;
+  const cycleHours = parseFloat(document.getElementById('nd-goal').value);
   const id = 'custom-' + Date.now();
-  D.disciplines.push({ id, name, area, status, reviewEvery:2, lastReviewedCycle:0 });
+  D.disciplines.push({ id, name, area, status, cycleHours, reviewEvery:2, lastReviewedCycle:0 });
   save();
   closeNewDiscModal();
   renderDiscs();
