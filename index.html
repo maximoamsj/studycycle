@@ -374,17 +374,8 @@ input[type=number] { -moz-appearance:textfield; }
     </div>
     <div class="fg" id="goal-field">
       <label class="fl">Meta de horas no ciclo</label>
-      <select id="modal-goal" class="fc">
-        <option value="1">1h</option>
-        <option value="1.25">1h15</option>
-        <option value="1.5">1h30</option>
-        <option value="1.75">1h45</option>
-        <option value="2">2h</option>
-        <option value="2.5">2h30</option>
-        <option value="3">3h</option>
-        <option value="3.5">3h30</option>
-        <option value="4">4h</option>
-      </select>
+      <input type="text" id="modal-goal" class="fc" placeholder="2:00 ou 120 (min)">
+      <div style="font-size:10px;color:var(--text-muted);margin-top:4px">Formatos: <strong>2:00</strong> · <strong>120</strong> (minutos) · <strong>2.5</strong> (horas)</div>
     </div>
     <div style="display:flex;gap:8px;margin-top:20px">
       <button class="btn btn-p" onclick="applyStatus()">Confirmar</button>
@@ -415,17 +406,8 @@ input[type=number] { -moz-appearance:textfield; }
     </div>
     <div class="fg">
       <label class="fl">Meta de horas no ciclo</label>
-      <select id="nd-goal" class="fc">
-        <option value="1">1h</option>
-        <option value="1.25">1h15</option>
-        <option value="1.5">1h30</option>
-        <option value="1.75">1h45</option>
-        <option value="2" selected>2h</option>
-        <option value="2.5">2h30</option>
-        <option value="3">3h</option>
-        <option value="3.5">3h30</option>
-        <option value="4">4h</option>
-      </select>
+      <input type="text" id="nd-goal" class="fc" placeholder="2:00 ou 120 (min)">
+      <div style="font-size:10px;color:var(--text-muted);margin-top:4px">Formatos: <strong>2:00</strong> · <strong>120</strong> (minutos) · <strong>2.5</strong> (horas)</div>
     </div>
     <div style="display:flex;gap:8px;margin-top:20px">
       <button class="btn btn-p" onclick="saveNewDisc()">Criar Disciplina</button>
@@ -1198,7 +1180,7 @@ function openModal(id) {
   document.getElementById('modal-title').textContent = d.name;
   document.getElementById('modal-status').value = d.status;
   document.getElementById('modal-rev-every').value = d.reviewEvery || 2;
-  document.getElementById('modal-goal').value = discGoal(d);
+  document.getElementById('modal-goal').value = fmtHInput(discGoal(d));
   toggleRevFields();
   document.getElementById('modal-overlay').classList.add('show');
 }
@@ -1212,7 +1194,10 @@ function applyStatus() {
   const d = disc(editId);
   const ns = document.getElementById('modal-status').value;
   const re = parseInt(document.getElementById('modal-rev-every').value);
-  const goal = parseFloat(document.getElementById('modal-goal').value);
+  const goal = parseTime(document.getElementById('modal-goal').value);
+  if (ns === 'ativa' && (isNaN(goal) || goal <= 0)) {
+    toast('Meta inválida — use 2:00, 120 ou 2.5', true); return;
+  }
   d.status = ns;
   if (ns === 'revisao') { d.reviewEvery = re; d.lastReviewedCycle = D.meta.cycle; }
   if (ns === 'ativa') { d.cycleHours = goal; }
@@ -1238,7 +1223,7 @@ function openNewDiscModal() {
   document.getElementById('nd-name').value = '';
   document.getElementById('nd-area').value = 'Geral';
   document.getElementById('nd-status').value = 'pendente';
-  document.getElementById('nd-goal').value = '2';
+  document.getElementById('nd-goal').value = '2:00';
   document.getElementById('modal-newdisc').classList.add('show');
   setTimeout(() => document.getElementById('nd-name').focus(), 100);
 }
@@ -1250,7 +1235,8 @@ function saveNewDisc() {
   if (!name) { toast('Informe o nome da disciplina', true); return; }
   const area = document.getElementById('nd-area').value;
   const status = document.getElementById('nd-status').value;
-  const cycleHours = parseFloat(document.getElementById('nd-goal').value);
+  const cycleHours = parseTime(document.getElementById('nd-goal').value);
+  if (isNaN(cycleHours) || cycleHours <= 0) { toast('Meta inválida — use 2:00, 120 ou 2.5', true); return; }
   const id = 'custom-' + Date.now();
   D.disciplines.push({ id, name, area, status, cycleHours, reviewEvery:2, lastReviewedCycle:0 });
   save();
