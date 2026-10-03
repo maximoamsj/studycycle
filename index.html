@@ -510,7 +510,7 @@ input[type=number] { -moz-appearance:textfield; }
 
 <div id="loading-screen" style="display:none;position:fixed;inset:0;background:#0d1117;z-index:999;align-items:center;justify-content:center;flex-direction:column;gap:14px">
   <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:800;color:#00d4aa">StudyCycle</div>
-  <div style="font-size:12px;color:#7d8590;font-family:'JetBrains Mono',monospace">Carregando dados da nuvem…</div>
+  <div style="font-size:12px;color:#7d8590;font-family:'JetBrains Mono',monospace">Carregando dados…</div>
   <div style="width:48px;height:3px;background:#1f2633;border-radius:2px;overflow:hidden;margin-top:4px">
     <div style="width:100%;height:100%;background:#00d4aa;border-radius:2px;animation:loadbar 1.2s ease-in-out infinite"></div>
   </div>
@@ -550,29 +550,186 @@ const DEFAULT = {
   meta: { cycle: 1, day: 1 }
 };
 
-// ============ SUPABASE CONFIG ============
-const SUPABASE_URL = 'https://uadqlgozygszlksndpkq.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhZHFsZ296eWdzemxrc25kcGtxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNzUzNTIsImV4cCI6MjA4OTk1MTM1Mn0.LEPpWHZCKX64AD_Ts5x-eaON5Z3Ddjb5v9NLXn2yY_s';
-const SB_HEADERS = { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY };
+// ============ BACKEND (Cloudflare Worker + D1) ============
+// >>> TROQUE pela URL do seu Worker (sem barra no final) <<<
+const API_URL   = 'https://studycycle.antonielmjr.workers.dev';
+const API_TOKEN = 'Af1eEX-sfKHy8REMX96QXIhezhmapY3R4AFYGdfZz2E';
+const API_HEADERS = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + API_TOKEN };
+
+// Camada de rede isolada: o resto do app não sabe qual backend está atrás.
+const api = {
+  async load() {
+    const res = await fetch(`${API_URL}/data`, { headers: API_HEADERS });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const body = await res.json();
+    return (body && body.data && body.data.disciplines) ? body.data : null;
+  },
+  async save(obj) {
+    const res = await fetch(`${API_URL}/data`, {
+      method: 'PUT', headers: API_HEADERS, body: JSON.stringify(obj)
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return true;
+  },
+  async ping() {
+    const res = await fetch(`${API_URL}/data`, { headers: API_HEADERS });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return true;
+  }
+};
 
 let D = JSON.parse(JSON.stringify(DEFAULT));
 let editId = null;
 let chH = null, chP = null;
 let _saveTimer = null;
+let _retryTimer = null;
+let isOffline = false;      // nuvem inacessível no momento
+let hasPending = false;     // há alterações locais ainda não enviadas
+let baseKnown = false;      // já sabemos qual era o estado real (nuvem ou cache)
 
-async function loadFromSupabase() {
+const LS_KEY = 'studycycle_cache_v1';
+const RETRY_MS = 30000;
+
+// ---------- cache local ----------
+function saveLocal() {
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/app_data?id=eq.1&select=data`, { headers: SB_HEADERS });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const rows = await res.json();
-    if (rows.length && rows[0].data && rows[0].data.disciplines) {
-      D = rows[0].data;
-      if (!D.mapaStudied) D.mapaStudied = {}; // compat: dados salvos antes do Mapa
-      migrateMapaKeys();
-    }
+    localStorage.setItem(LS_KEY, JSON.stringify({
+      data: D, pending: hasPending, cachedAt: new Date().toISOString()
+    }));
+  } catch(e) { console.error('localStorage write error:', e); }
+}
+
+function readLocal() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return null;
+    const c = JSON.parse(raw);
+    return (c && c.data && c.data.disciplines) ? c : null;
+  } catch(e) { console.error('localStorage read error:', e); return null; }
+}
+
+function stamp(obj) { return (obj && obj.meta && obj.meta.updatedAt) || ''; }
+
+function normalize(obj) {
+  if (!obj.mapaStudied) obj.mapaStudied = {};
+  if (!obj.meta) obj.meta = { cycle:1, day:1 };
+  return obj;
+}
+
+// Baixa um backup do estado local antes de descartá-lo num conflito
+function downloadBackup(obj, label) {
+  try {
+    const blob = new Blob([JSON.stringify(obj, null, 2)], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `studycycle_${label}_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch(e) { console.error('backup download error:', e); }
+}
+
+// ---------- carregamento ----------
+async function loadFromCloud() {
+  const local = readLocal();
+  let cloud = null;
+
+  try {
+    const fromApi = await api.load();
+    if (fromApi) cloud = normalize(fromApi);
+    isOffline = false;
   } catch(e) {
-    console.error('Supabase load error:', e);
-    showSyncStatus('erro ao carregar ⚠', true);
+    console.error('Cloud load error:', e);
+    isOffline = true;
+  }
+
+  // --- nuvem indisponível: usa cache local ---
+  if (isOffline) {
+    if (local) {
+      D = normalize(local.data);
+      hasPending = !!local.pending;
+      baseKnown = true;              // o cache veio de uma sincronização anterior
+      if (migrateMapaKeys()) hasPending = true;
+      saveLocal();
+      showSyncStatus(hasPending ? 'offline · alterações pendentes' : 'offline · usando cache', true);
+    } else {
+      // sem cache e sem nuvem: estado em branco — não pode sobrescrever a nuvem
+      baseKnown = false;
+      showSyncStatus('offline · sem cache local', true);
+    }
+    scheduleRetry();
+    return;
+  }
+
+  // --- nuvem OK, sem cache local ---
+  baseKnown = true;
+  if (!local) {
+    let mig = false;
+    if (cloud) { D = cloud; mig = migrateMapaKeys(); }
+    hasPending = mig;
+    saveLocal();
+    if (mig) flushToCloud(); else showSyncStatus('sincronizado ✓');
+    return;
+  }
+
+  // --- nuvem OK, cache local sem pendências ---
+  if (!local.pending) {
+    if (!cloud) {
+      // Backend acessível porém VAZIO (ex.: banco novo após migrar de provedor)
+      // e existe cache local com dados: o cache manda e sobe para o backend.
+      // Sem isto, o estado em branco sobrescreveria o cache.
+      D = normalize(local.data);
+      migrateMapaKeys();
+      hasPending = true;
+      saveLocal();
+      flushToCloud();
+      return;
+    }
+    D = cloud;
+    const mig = migrateMapaKeys();
+    hasPending = mig;
+    saveLocal();
+    if (mig) flushToCloud(); else showSyncStatus('sincronizado ✓');
+    return;
+  }
+
+  // --- nuvem OK e há trabalho local não enviado ---
+  const tLocal = stamp(local.data);
+  const tCloud = stamp(cloud);
+
+  if (!cloud || !tCloud || tLocal >= tCloud) {
+    // local é mais recente (ou nuvem vazia): recupera o trabalho offline
+    D = normalize(local.data);
+    migrateMapaKeys();
+    hasPending = true;
+    saveLocal();
+    flushToCloud();
+    return;
+  }
+
+  // conflito real: os dois lados mudaram desde a última sincronização
+  downloadBackup(local.data, 'backup-local');
+  const keepLocal = confirm(
+    'Conflito de sincronização.\n\n' +
+    'Há alterações feitas offline neste computador, mas a nuvem foi atualizada depois ' +
+    '(provavelmente de outro computador).\n\n' +
+    'Um backup da versão local foi baixado para a sua pasta de downloads.\n\n' +
+    'OK = manter a versão LOCAL (sobrescreve a nuvem)\n' +
+    'Cancelar = manter a versão da NUVEM (descarta as alterações locais)'
+  );
+
+  if (keepLocal) {
+    D = normalize(local.data);
+    migrateMapaKeys();
+    hasPending = true;
+    saveLocal();
+    flushToCloud();
+  } else {
+    D = cloud;
+    migrateMapaKeys();
+    hasPending = false;
+    saveLocal();
+    showSyncStatus('sincronizado ✓ (local descartado)');
   }
 }
 
@@ -588,35 +745,116 @@ function migrateMapaKeys() {
       moved++;
     }
   });
-  if (moved) save();
+  return moved > 0;
 }
 
+// ---------- gravação ----------
+// Grava SEMPRE no cache local (instantâneo) e tenta a nuvem em seguida.
 function save() {
-  // debounce — coalesce rapid saves into one request
+  if (!D.meta) D.meta = { cycle:1, day:1 };
+  D.meta.updatedAt = new Date().toISOString();
+  hasPending = true;
+  saveLocal();
+
   clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(async () => {
-    try {
-      showSyncStatus('salvando…');
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/app_data?id=eq.1`, {
-        method: 'PATCH',
-        headers: { ...SB_HEADERS, 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ data: D })
-      });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      showSyncStatus('salvo ✓');
-    } catch(e) {
-      console.error('Supabase save error:', e);
-      showSyncStatus('erro ao salvar ⚠', true);
+  _saveTimer = setTimeout(flushToCloud, 400);
+}
+
+async function flushToCloud() {
+  if (!hasPending) return;
+
+  // Começamos em branco (sem nuvem e sem cache). Antes de enviar qualquer coisa,
+  // é preciso descobrir se a nuvem já tinha dados — senão sobrescreveríamos tudo.
+  if (!baseKnown) {
+    const ok = await reconcileBlankStart();
+    if (!ok) { scheduleRetry(); return; }
+  }
+
+  try {
+    showSyncStatus('salvando…');
+    await api.save(D);
+    hasPending = false;
+    isOffline = false;
+    saveLocal();
+    clearTimeout(_retryTimer);
+    showSyncStatus('salvo ✓');
+  } catch(e) {
+    console.error('Cloud save error:', e);
+    isOffline = true;
+    saveLocal(); // mantém pending = true
+    showSyncStatus('offline · salvo neste PC', true);
+    scheduleRetry();
+  }
+}
+
+// Resolve o caso de o app ter iniciado em branco: confere o que há na nuvem
+// antes de deixar os dados locais sobrescreverem qualquer coisa.
+// Retorna true se é seguro enviar.
+async function reconcileBlankStart() {
+  let cloud = null;
+  try {
+    const fromApi = await api.load();
+    if (fromApi) cloud = normalize(fromApi);
+  } catch(e) {
+    return false; // nuvem ainda fora — continua só local
+  }
+
+  const cloudHasData = cloud && ((cloud.sessions||[]).length || (cloud.questions||[]).length
+                        || Object.keys(cloud.mapaStudied||{}).length);
+  if (!cloudHasData) { baseKnown = true; return true; } // nuvem vazia: pode enviar
+
+  // A nuvem tinha dados e este PC começou do zero — não sobrescreve sem perguntar.
+  downloadBackup(D, 'backup-local');
+  const keepLocal = confirm(
+    'A nuvem voltou e já continha dados.\n\n' +
+    'Este computador começou com o app vazio (estava offline) e você registrou coisas desde então.\n\n' +
+    'Um backup do que foi registrado aqui foi baixado para a sua pasta de downloads.\n\n' +
+    'OK = enviar o que está AQUI (substitui os dados da nuvem)\n' +
+    'Cancelar = carregar os dados da NUVEM (descarta o registrado aqui)'
+  );
+
+  baseKnown = true;
+  if (keepLocal) return true;
+
+  D = cloud;
+  migrateMapaKeys();
+  hasPending = false;
+  saveLocal();
+  showSyncStatus('dados da nuvem carregados ✓');
+  if (typeof nav === 'function') nav('dashboard');
+  return false;
+}
+
+function scheduleRetry() {
+  clearTimeout(_retryTimer);
+  _retryTimer = setTimeout(async () => {
+    if (hasPending) {
+      await flushToCloud();
+    } else if (!baseKnown) {
+      // começamos em branco: quando a nuvem voltar, carrega os dados de verdade
+      await loadFromCloud();
+      if (baseKnown) { renderDash(); return; }
+      scheduleRetry();
+    } else {
+      // sem pendências: só confere se a nuvem voltou
+      try {
+        await api.ping();
+        isOffline = false; showSyncStatus('conectado ✓'); return;
+      } catch(e) { scheduleRetry(); }
     }
-  }, 400);
+  }, RETRY_MS);
 }
 
 function showSyncStatus(msg, err=false) {
   const el = document.getElementById('sync-status');
   if (!el) return;
   el.textContent = msg;
-  el.style.color = err ? 'var(--red)' : 'var(--text-muted)';
+  el.style.color = err ? 'var(--amber)' : 'var(--text-muted)';
 }
+
+// o navegador avisa quando a rede volta — aproveita para reenviar na hora
+window.addEventListener('online', () => { if (hasPending || isOffline) flushToCloud(); });
+window.addEventListener('offline', () => { isOffline = true; showSyncStatus('sem conexão', true); });
 
 // ============ HELPERS ============
 function disc(id) { return D.disciplines.find(d => d.id === id); }
@@ -671,6 +909,15 @@ function fmtH(hours) {
   return h + 'h' + String(m).padStart(2,'0');
 }
 function discGoal(d) { return (d && d.cycleHours) ? d.cycleHours : 2; }
+// Chart.js vem de CDN; sem ele os gráficos somem mas as tabelas continuam funcionando
+function chartsOn() { return typeof Chart !== 'undefined'; }
+function chartMsg(id) {
+  const cv = document.getElementById(id);
+  if (!cv || !cv.parentElement) return;
+  cv.parentElement.innerHTML =
+    '<p style="font-size:11px;color:var(--text-muted);padding:20px 0;text-align:center">' +
+    'Gráfico indisponível offline — os dados abaixo continuam corretos.</p>';
+}
 // horas decimais → "1:30" para preencher campo editável
 function fmtHInput(hours) {
   if (!hours || isNaN(hours)) return '';
@@ -855,6 +1102,7 @@ function renderMonthlyChart() {
   const colors = data.map((_, i) => i === data.length-1 ? 'rgba(0,212,170,0.8)' : 'rgba(0,212,170,0.32)');
   const borders = data.map((_, i) => i === data.length-1 ? '#00d4aa' : 'rgba(0,212,170,0.5)');
 
+  if (!chartsOn()) { chartMsg('ch-monthly'); return; }
   if (chMonthly) chMonthly.destroy();
   if (!keys.length) { document.getElementById('ch-monthly').style.display='none'; return; }
   document.getElementById('ch-monthly').style.display='';
@@ -1196,6 +1444,8 @@ function renderPerf() {
   const pData = np.map(d => { const s=qStats(d.id); return s.pct!==null?s.pct:0; });
   const pColors = pData.map((p,i) => qStats(np[i].id).pct===null ? 'rgba(125,133,144,0.3)' : p>=75?'rgba(0,212,170,0.75)':p>=60?'rgba(245,166,35,0.75)':'rgba(248,81,73,0.75)');
 
+  if (!chartsOn()) { chartMsg('ch-hrs'); chartMsg('ch-pct'); renderTopicTable(); return; }
+
   if (chH) chH.destroy();
   if (chP) chP.destroy();
 
@@ -1514,11 +1764,13 @@ function importData(event) {
   const reader = new FileReader();
   reader.onload = e => {
     try {
-      const parsed = JSON.parse(e.target.result);
+      let parsed = JSON.parse(e.target.result);
+      // aceita também o formato do cache local: { data: {...}, pending, cachedAt }
+      if (parsed && parsed.data && parsed.data.disciplines) parsed = parsed.data;
       if (!parsed.disciplines || !parsed.sessions || !parsed.questions || !parsed.meta) {
         toast('Arquivo inválido — estrutura incorreta', true); return;
       }
-      D = parsed;
+      D = normalize(parsed);
       save();
       nav('dashboard');
       toast('Dados importados — sincronizando com nuvem…');
@@ -1534,10 +1786,15 @@ function importData(event) {
 (async () => {
   document.getElementById('loading-screen').style.display = 'flex';
   document.querySelector('.app').style.display = 'none';
-  await loadFromSupabase();
+  await loadFromCloud();
   document.getElementById('loading-screen').style.display = 'none';
   document.querySelector('.app').style.display = 'flex';
   renderDash();
+  if (isOffline) {
+    toast(baseKnown
+      ? 'Nuvem indisponível — trabalhando offline neste PC'
+      : 'Nuvem indisponível e sem cache local — dados aparecerão quando ela voltar', true);
+  }
 })();
 </script>
 </body>
